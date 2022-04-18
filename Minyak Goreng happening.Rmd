@@ -1,0 +1,748 @@
+---
+title: "Web Text Scrappping"
+author: "Kylee Valencia"
+date: "3/17/2022"
+output: 
+  html_document: 
+    fig_width: 14
+    fig_height: 8
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r}
+loadpackageCompete<-function(x){
+  install.packages(setdiff(x, rownames(installed.packages())))
+  xfun::pkg_attach(x)
+}
+```
+
+
+```{r warning=FALSE, include=FALSE}
+# For Html text Processing
+for_text_extraction<-c("rvest","robotstxt","XML","quanteda","tm","textclean")
+loadpackageCompete(for_text_extraction)
+
+# For text manipulation
+for_text_analysisProcessing<-c("stringr","dplyr","tidyverse")
+loadpackageCompete(for_text_analysisProcessing)
+#For visualization
+for_visual_dashboard<-c("ggplot2","plotly","paletteer")
+loadpackageCompete(for_visual_dashboard)
+
+
+```
+
+
+
+#Source data to be scrapped
+```{r}
+scrap_minyak<- c(
+                "nasional.kontan" = "https://nasional.kontan.co.id/news/soal-harga-minyak-goreng-mahal-mendagri-ini-kesalahan-saya?page=all",
+                "money.kompas"  = "https://money.kompas.com/read/2022/03/23/065838326/cek-harga-minyak-goreng-jelang-ramadhan",
+                "cnn.indo" = "https://www.cnnindonesia.com/ekonomi/20220302193301-92-766134/daftar-harga-komoditas-di-dunia-yang-naik-akibat-perang-rusia-ukraina",
+                "BBC" = "https://www.bbc.com/indonesia/60837667",
+                "ekonomi.bisnis" = "https://ekonomi.bisnis.com/read/20220307/12/1507833/harga-minyak-goreng-curah-naik-lagi-tembus-rp17100-per-liter",
+                "dpr.go" = "https://www.dpr.go.id/berita/detail/id/38086/t/Harga+Minyak+Goreng+Harus+Diredam")
+```
+
+
+
+#Indonesia Stopword
+```{r}
+read.delim("https://raw.githubusercontent.com/SokKanaTorajd/indonesia-stopwords/main/indonesia-stopwords.txt",
+           sep = "\n",
+           header = T) %>% setNames("IndoStopWords") -> IndonesiaStopword
+```
+
+
+```{r}
+IndonesiaStopword
+```
+
+
+#Indonesia SlangWord
+```{r}
+read.delim("https://raw.githubusercontent.com/yudiwbs/indonesian_slang/main/catatan_kata_sinonim.txt",
+           sep="\n",
+           header = F) %>% 
+  setNames("IndoSlang") %>% rbind("migor=minyak goreng") -> IndonesiaSlang
+IndonesiaSlang
+
+```
+
+
+#Cleaning slangword dictionary format
+```{r}
+str_split_fixed(string=IndonesiaSlang$IndoSlang, pattern = fixed("="), n=2) %>%
+  data.frame() %>%
+  setNames(c("Slang", "Formal")) %>%
+  dplyr::mutate(Formal= gsub(x = Formal,"(<|>)", replacement = "")) ->
+  IndonesiaSlang
+```
+
+
+```{r}
+IndonesiaSlang %>% rbind(c("chain","rantai")) -> IndonesiaSlang
+```
+
+
+
+```{r}
+IndonesiaSlang
+```
+
+#Count the word freq
+```{r}
+wordFreqG <- function(x){
+  print(class(x))
+  
+  x %>%
+    replace_internet_slang(slang = paste0("\\b", IndonesiaSlang$Slang, "\\b"), replacement = IndonesiaSlang$Formal) %>%
+    VectorSource() %>%
+    Corpus() %>%
+    tm_map(removeWords, IndonesiaStopword$IndoStopWords) %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removePunctuation) %>% 
+    tm_map(stripWhitespace) %>%
+    tm_map(stemDocument, language = "indonesian") %>%
+    TermDocumentMatrix()%>%
+    as.matrix() %>%
+    rowSums() %>%
+    sort(decreasing = TRUE) %>%
+    data.frame() %>%
+    setNames("freq") -> wordMinyakFreq
+
+  return(wordMinyakFreq)
+  
+}
+  
+
+```
+
+
+#Read html into text data
+```{r}
+turn_Text <- function(a){
+  read_html(a ) %>% 
+    html_elements("p") %>%
+    html_text() %>% 
+    tolower() %>%
+    replace_internet_slang(slang = paste0("\\b", IndonesiaSlang$Slang, "\\b"), replacement = IndonesiaSlang$Formal) -> dataText
+  
+  return(dataText)
+}
+```
+
+
+```{r}
+WhoseBest <- c()
+```
+
+
+```{r}
+for (i in scrap_minyak){
+  tempData <- i %>% turn_Text()
+  WhoseBest <- c(WhoseBest, tempData)
+  
+}
+```
+
+
+
+```{r}
+WhoseBest %>% wordFreqG() -> FreqWord_Table
+```
+
+```{r}
+FreqWord_Table
+
+```
+
+
+```{r}
+library(readxl)
+
+minyak_goreng_curah_harga_17_Feb_24_Mar_2022 <- read_excel("minyak goreng curah harga 17 Feb - 24 Mar 2022.xls")
+
+
+```
+
+
+
+
+```{r}
+colNameRep <- function(ModifData){
+  colnames(ModifData) %>% 
+  gsub(pattern = "\\/",replacement = "-") -> colnames(ModifData)
+  
+  return(ModifData)
+}
+```
+
+
+```{r}
+basic_info<-function(df,varname=""){
+  
+             df%>% 
+                     is.na() %>%
+                     colSums() %>%
+                     data.frame() %>%
+                     setNames("Total_Missing_Value") -> new_Data
+  
+              return( new_Data %>%
+                     mutate("Data_Type"=(lapply(df, class)%>%
+                                            as.data.frame() %>%
+                                            t %>%
+                                            as.data.frame() %>% 
+                                            setNames(c("DataType")) )$DataType) 
+                     )
+}
+```
+
+
+```{r}
+NA24Rowname <- function(x){
+  basic_info(x) %>% subset(Total_Missing_Value>=1) %>% rownames() %>% return()
+
+}
+```
+
+
+```{r}
+CleanTableXLS <- function(df){
+  df %>% 
+    colNameRep() %>%
+     select(-"No.") -> df ;df %>%
+     t() %>% 
+    as.data.frame() %>% setNames(df[[1]]) -> df; df %>%
+    subset(rownames(df)!="Provinsi") -> df; 
+    df[df=="-"]=NA
+    df %>%
+    select(-(NA24Rowname(df))) -> df;
+    
+  return(df)
+    
+    
+}
+```
+
+
+```{r}
+convertDateandDouble <- function(DD){
+  lapply(DD, as.double) %>% data.frame() %>%   
+    mutate("Tanggal"=rownames(DD), .before=SEMUA.PROVINSI) ->testDD;
+  testDD %>% 
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), median(x, na.rm = T), x))
+  testDD$Tanggal = as.Date(testDD$Tanggal, "%d-%m-%Y")
+  
+  return(testDD)
+}
+```
+
+
+```{r}
+meltData <- function(TableD){
+  
+  data.table::melt(TableD, 
+                   id.vars="Tanggal" , 
+                   measure.vars = TableD %>%
+                     select(-Tanggal) %>% 
+                     colnames()) %>% 
+                     setNames(c("Tanggal", "Provinsi", "Harga")) -> TableD
+  return(TableD)
+  
+}
+
+```
+
+
+
+```{r echo=FALSE}
+minyak_goreng_curah_harga_17_Feb_24_Mar_2022 %>% 
+  colNameRep %>% 
+  CleanTableXLS %>% 
+  convertDateandDouble %>% 
+  meltData -> Minyak_Curah_Harga
+  
+Minyak_Curah_Harga
+  
+```
+
+
+```{r}
+FreqWord_Table %>% 
+  mutate(Words = rownames(FreqWord_Table), .before=freq) -> FreqWord_Table;
+
+rownames(FreqWord_Table) = c(1:nrow(FreqWord_Table))
+FreqWord_Table
+```
+
+```{r}
+toSentence <- function(x){
+  return(paste0(toupper(substr(x,1,1)), substr(x,2,str_length(x)) %>% tolower()))
+}
+```
+
+
+```{r}
+library(repr)
+options(repr.plot.width = 20, repr.plot.height = 8)
+FreqWord_Table %>% subset(!Words %in% c("minyak",
+                                        "goreng",
+                                        "dagang",
+                                        "mendag",
+                                        "masan",
+                                        "usaha",
+                                        "sawit",
+                                        "sumber", 
+                                        "gambar",
+                                        "nomor",
+                                        "teri",
+                                        "persen",
+                                        "bijak",
+                                        "lutfi"
+                                        )) %>% 
+  mutate(Words = toSentence(Words)) %>%
+  mutate(Words = case_when(Words=="Subsid" ~ "Subsidi",
+                           Words=="Cpo" ~ "Crude Palm\nOil\n(CPO)",
+                           Words=="Het" ~"HET",
+                           Words=="Perintah" ~ "Pemerintah",
+                           T ~ Words)) %>% 
+  top_n(11) -> Words10Top
+
+```
+
+```{r}
+Words10Top
+
+```
+
+
+```{r}
+interactPlotlyArea <- function(plDD, Area = "", colorP =paletteer_d("rcartocolor::Pastel")){
+  plDD %>% ggplot(aes(Tanggal, Harga,col=Provinsi)) + 
+  geom_line(size=0.7)+ geom_point(size=1.65 ) + 
+  labs(title = paste("Harga Minyak Curah berdasarkan Data PIHPS (liter):",Area),
+       y = "Harga (Rp)")+
+  theme_light() + 
+    theme(plot.title = element_text(face = "bold", size=10, hjust=0.5),
+          axis.title.y = element_text(face="bold", size = 8),
+          axis.title.x = element_text(face="bold", size = 8))+
+    scale_color_manual(values=  colorP)-> plDD
+  #facet_wrap(~Provinsi, scale="free") +
+
+  return(plDD %>% ggplotly())
+  
+}
+```
+
+
+
+#Load desire color palette for plotting
+```{r}
+paletteer_d("basetheme::brutal") -> palet1
+paletteer_d("beyonce::X90") -> palet2
+paletteer_d("Polychrome::light") -> palet3
+paletteer_d("ggthemes::Classic_Cyclic") -> palet4
+paletteer_d("ggsci::default_ucscgb") ->palet5
+palet6 <-paletteer_d("vapoRwave::vapoRwave")
+palet6
+
+palet1;palet2;palet3;palet4;palet5
+```
+
+
+#Plot without splitting categorical data
+```{r}
+interactPlotlyGeneral <- function(plDD, color="aliceblue"){
+  plDD %>% ggplot(aes(Tanggal, Harga)) + 
+  geom_line(size=0.7, color  = color)+ geom_point()  + 
+  labs(title = paste("Harga Rata-Rata Minyak Curah berdasarkan Data PIHPS (liter)"))+
+    theme_light()+ theme(legend.position = "none",
+                         plot.title = element_text(hjust = 0.5,face = "bold", size=14),
+                         axis.title.x = element_text(face="bold", size=11),
+                         axis.title.y = element_text(face="bold", size=11))-> plDD
+  #facet_wrap(~Provinsi, scale="free") +
+
+  return(plDD %>% ggplotly())
+  
+}
+```
+
+
+
+Plot need to be make
+[1] Top 9 Frequent word talk in Minyak Goreng
+```{r}
+Words10Top  %>%
+  ggplot(aes(x=reorder(Words, -freq),
+             y = freq, 
+             fill = factor(freq, levels = factor(freq)%>%unique)))+ 
+  geom_col(width = 0.55) +
+  labs(x = "Popular Words",
+       y="Frequency", 
+       title = "Top 9 Popular Words about Minyak Goreng 2022",
+       fill = "Word Intensity")+
+  theme_linedraw()+
+  theme(axis.text.x = element_text(angle = -18), 
+        legend.title = element_blank(),
+        plot.title = element_text(face = "bold", hjust = 0.5, size=17),
+        axis.title.x = element_text(size=11, face="bold",margin = margin( l= 3)),
+        axis.title.y = element_text(size=11, face="bold"))+
+  scale_fill_manual(values = palet4)-> objectPopular
+  objectPopular
+```
+
+
+[2] Plot Cluster for Minyak Curah
+```{r}
+ProvinsiMinyakCurah <- Minyak_Curah_Harga$Provinsi %>% as.character()
+
+case_when(ProvinsiMinyakCurah=="DKI.JAKARTA" ~ "JAKARTA",
+          ProvinsiMinyakCurah=="DI.YOGYAKARTA" ~"YOGYAKARTA",
+          T ~ ProvinsiMinyakCurah) -> ProvinsiMinyakCurah
+
+```
+
+
+```{r}
+ProvinsiMinyakCurah %>% unique
+```
+
+
+```{r}
+cbind((Minyak_Curah_Harga$Provinsi %>% as.character() %>% unique), ProvinsiMinyakCurah %>% unique) %>% as.data.frame()
+```
+```{r}
+Minyak_Curah_Harga$Provinsi <- Minyak_Curah_Harga$Provinsi %>% as.character()
+```
+
+
+```{r}
+testChangeStr <- function(x) {
+  str_split(x, pattern = "\\.") %>%
+    unlist() %>% lapply(toSentence) %>% paste(collapse = " ") -> newStr
+  
+  return(newStr)
+}
+
+```
+
+
+```{r}
+ProvinsiMinyakCurah %>% lapply(testChangeStr) %>% unlist() -> ProvinsiMinyakCurah
+
+```
+
+```{r}
+ProvinsiClus1 <- c("Aceh", "Sumatera Utara", "Sumatera Barat",
+                   "Riau", "Lampung", "Jambi",
+                   "Banten", "Sumatera Selatan", "Jakarta")
+ProvinsiClus2 <- c("Jawa Tengah", "Yogyakarta", "Jawa Barat",
+                   "Jawa Timur", "Bali", "Nusa Tenggara Barat",
+                   "Kalimantan Barat", "Kalimantan Tengah", "Kalimantan Utara" )
+ProvinsiClus3 <- c("Kalimantan Timur", "Kalimantan Selatan", "Sulawesi Selatan",
+                   "Sulawesi Tenggara", "Sulawesi Tengah", "Sulawesi Utara",
+                   "Sulawesi Barat", "Maluku Utara", "Papua" )
+```
+
+
+```{r}
+ProvinsiMinyakCurah %>% unique
+```
+
+
+```{r}
+
+Minyak_Curah_Harga$Provinsi <- ProvinsiMinyakCurah
+
+
+```
+
+
+
+```{r}
+plotGeneralMinyak <- Minyak_Curah_Harga %>% subset(Provinsi=="Semua Provinsi") 
+PlotClus1Minyak <- Minyak_Curah_Harga %>% subset(Provinsi %in% ProvinsiClus1)
+PlotClus2Minyak <- Minyak_Curah_Harga %>% subset(Provinsi %in% ProvinsiClus2)
+PlotClus3Minyak <- Minyak_Curah_Harga %>% subset(Provinsi %in% ProvinsiClus3)
+```
+
+
+```{r}
+PlotClus1Minyak$Provinsi %>% unique
+PlotClus2Minyak$Provinsi %>% unique
+PlotClus3Minyak$Provinsi %>% unique
+```
+
+
+
+
+
+```{r}
+interactPlotlyGeneral(plotGeneralMinyak, color = "royalblue2")-> Minyak_Curah_RataRata_Provinsi
+Minyak_Curah_RataRata_Provinsi
+```
+
+```{r}
+Minyak_Curah_Clus1 <- interactPlotlyArea(PlotClus1Minyak, "\nArea Cluster 1", colorP = palet3)
+Minyak_Curah_Clus2 <- interactPlotlyArea(PlotClus2Minyak, "\nArea Cluster 2", colorP = palet5)
+Minyak_Curah_Clus3 <- interactPlotlyArea(PlotClus3Minyak, "\nArea Cluster 3", colorP = palet6)
+
+Minyak_Curah_Clus1;Minyak_Curah_Clus2;
+Minyak_Curah_Clus3
+```
+
+
+Plot For Top 9 Words
+```{r}
+Top9Words <- ggplotly(objectPopular)
+Top9Words
+
+```
+
+
+
+
+```{r}
+read_html("https://www.cpopc.org/") %>% 
+  html_elements("table") %>% 
+  html_table() -> CPOPCPalmOilPrice
+CPOPCPalmOilPrice %>% as.data.frame() %>% select(-wdt_ID) ->CPOPCPalmOilPrice
+CPOPCPalmOilPrice
+
+```
+
+
+
+```{r}
+as.Date(CPOPCPalmOilPrice$Closing.date,"%d %b %Y") -> CPOPCPalmOilPrice$Closing.date
+CPOPCPalmOilPrice
+```
+
+
+```{r}
+basic_info(CPOPCPalmOilPrice)
+```
+
+
+```{r}
+gsub(pattern = "\\,",x =  CPOPCPalmOilPrice$CPO.FOB.Indonesia, replacement = "") %>% as.double -> CPOPCPalmOilPrice$CPO.FOB.Indonesia
+
+gsub(pattern = "\\,",x =  CPOPCPalmOilPrice$CPO.FOB.Malaysia, replacement = "") %>% as.double -> CPOPCPalmOilPrice$CPO.FOB.Malaysia
+
+gsub(pattern = "\\,",x =  CPOPCPalmOilPrice$SBO.Rotterdam.ex.mill, replacement = "") %>% as.double -> CPOPCPalmOilPrice$SBO.Rotterdam.ex.mill
+```
+
+
+```{r}
+basic_info(CPOPCPalmOilPrice)
+```
+
+
+
+```{r}
+CPOPCPalmOilPrice %>% setNames(c("Tanggal", "CPO FOB Indonesia", "CPO FOB Malaysia", "SBO Rotterdam ex mill")) -> CPOPCPalmOilPrice
+CPOPCPalmOilPrice
+```
+
+
+
+meltData <- function(TableD){
+  
+  data.table::melt(TableD, 
+                   id.vars="Tanggal" , 
+                   measure.vars = TableD %>%
+                     select(-Tanggal) %>% 
+                     colnames()) %>% 
+                     setNames(c("Tanggal", "Provinsi", "Harga")) -> TableD
+  return(TableD)
+  
+}
+
+
+```{r}
+library(data.table)
+ data.table::melt(CPOPCPalmOilPrice, id.vars ="Tanggal", 
+                  measure.vars = c("CPO FOB Indonesia", "CPO FOB Malaysia", "SBO Rotterdam ex mill")) %>% dplyr::rename("CPO Parlement"=2, "Price"=3) -> CPOPTable
+
+```
+
+```{r}
+CPOPTable %>% ggplot(aes(x = Tanggal, y = Price, col = `CPO Parlement`))+
+  geom_point() + geom_line(size=1)+ 
+  labs(title = "Council of Palm Oil Producing Country",
+       y = "Price in USD per metric-ton") +theme_light()+
+  theme(plot.title = element_text(face = "bold", size = 14, hjust=0.5),
+        axis.title.x = element_text(face = "bold", size=11),
+        axis.title.y = element_text(face = "bold", size = 11))-> p
+p%>% ggplotly() -> CPO_PalmOilPalement
+CPO_PalmOilPalement
+```
+
+
+
+##Proof of in global Oil price beside palm oil also rise significanly "https://www.bpdp.or.id/CPO_rotterdam.php"
+
+```{r}
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March <- read.csv("Crude Palm Oil Futures Historical Data 15 Feb - 24 March.csv")
+Palm_Oil_Price_17Feb2021_24March2021 <- read.csv("Palm Oil Price 17Feb2021-24March2021.csv")
+```
+
+
+```{r}
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March
+
+Palm_Oil_Price_17Feb2021_24March2021
+
+```
+
+
+
+```{r}
+
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March %>% 
+  dplyr::rename("Tanggal" = ï..Date) %>% select(-"Change..") -> Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March
+
+Palm_Oil_Price_17Feb2021_24March2021 %>% dplyr::rename("Tanggal" = "Date") -> Palm_Oil_Price_17Feb2021_24March2021
+
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March
+
+Palm_Oil_Price_17Feb2021_24March2021
+
+```
+
+```{r}
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March$Vol.= NULL
+Palm_Oil_Price_17Feb2021_24March2021$Volume = NULL
+
+```
+
+
+```{r}
+Palm_Oil_Price_17Feb2021_24March2021
+
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March
+```
+
+
+```{r}
+basic_info(Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March)
+basic_info(Palm_Oil_Price_17Feb2021_24March2021)
+```
+
+
+
+```{r}
+
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March$Tanggal  %>% 
+  as.Date("%b %d, %Y") -> Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March$Tanggal
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March
+```
+
+
+```{r}
+Palm_Oil_Price_17Feb2021_24March2021$Tanggal %>% 
+  as.Date("%m/%d/%y") -> Palm_Oil_Price_17Feb2021_24March2021$Tanggal
+Palm_Oil_Price_17Feb2021_24March2021
+```
+
+```{r}
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March[c("Price","Open","High","Low")] %>% 
+  Map( f = function(x){
+  x %>% gsub(pattern = "\\,", replacement = "") %>% as.double()
+}) %>% as.data.frame() ->  Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March[c("Price","Open","High","Low")]
+```
+
+```{r paged.print=TRUE}
+Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March
+```
+
+
+```{r warning=FALSE}
+data.table::melt(Crude_Palm_Oil_Futures_Historical_Data_15_Feb_24_March, id.vars="Tanggal",
+                           measure.vars = c("Price","Open","High","Low")) %>% dplyr::rename("State" = 2, Cost = 3) -> CPO_15
+```
+
+
+```{r warning=FALSE}
+data.table::melt(Palm_Oil_Price_17Feb2021_24March2021, id.vars = "Tanggal" ,
+                 measure.vars = c("Close","Open","High","Low")) %>% dplyr::rename("State" = 2, Cost = 3) -> Future_PalmOil_data
+```
+
+
+```{r}
+CPO_15 %>% ggplot(aes(x = Tanggal, y = Cost, col = State))+ geom_point() +
+  geom_line(size=.7) + theme_light() + labs(title = "Investing Website investment Palm Oil Price India",
+                                            x = "Date") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size=14),
+        axis.title.x = element_text(face="bold", size=11),
+        axis.title.y = element_text(face = "bold", size=11)) -> PalmOilInvestI
+
+PalmOilInvestI %>% ggplotly() -> PalmOilInvestI
+PalmOilInvestI
+```
+
+
+
+```{r}
+Future_PalmOil_data %>% ggplot(aes(x = Tanggal, y = Cost, col = State))+ geom_point() +
+  geom_line(size=.7) + theme_light() + labs(title = "Market Insider Investment Palm Oil Price",
+                                            x = "Date") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size=14),
+        axis.title.x = element_text(face="bold", size=11),
+        axis.title.y = element_text(face = "bold", size=11)) -> PalmOilInvestII
+
+PalmOilInvestII %>% ggplotly() -> PalmOilInvestII
+PalmOilInvestII
+```
+
+## Contoh cara melakukan save plot kedalam bentuk html document
+
+```{r eval=FALSE, include=FALSE}
+htmlwidgets::saveWidget(interactPlotly(DataFrameListHarga[[1]],
+                                       names(DataFrameListHarga[1])),
+                        "nama file.html")
+```
+
+
+```{r}
+Minyak_Curah_Clus3
+```
+
+
+## Start dari line dibawah ini kode jangan dijalankan dikarenakan untuk mengexport plot dari R 
+   ke akun chart-studio plotly
+
+
+```{r eval=FALSE, include=FALSE}
+MyPlotly_API_Key = "J7eD0B5c9KPa9JJSGUWK"
+MyPlotly_API_Token = "tx4g0r2r1e"
+
+MyPlotly_Username = "Trumpet_Me"
+
+
+Sys.setenv("plotly_username" = MyPlotly_Username)
+Sys.setenv("plotly_api_key" = MyPlotly_API_Key)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+options(browser = "false")
+api_create(Top9Words, filename = "Capstone Top 9 Words Corelated to Minyak Sawit", fileopt = "overwrite")
+api_create(Minyak_Curah_Clus1, filename = paste("Capstone", "Minyak Curah Area C1"), fileopt = "overwrite")
+api_create(Minyak_Curah_Clus2, filename = paste("Capstone", "Minyak Curah Area C2"), fileopt = "overwrite")
+api_create(Minyak_Curah_Clus3, filename = paste("Capstone", "Minyak Curah Area C3"), fileopt = "overwrite")
+api_create(Minyak_Curah_RataRata_Provinsi, filename = paste("Capstone", "Minyak Curah Rata-rata di Indonesia"), fileopt = "overwrite")
+api_create(PalmOilInvestI, filename = paste("Capstone", "India Investment Palm Oil Platform"), fileopt = "overwrite")
+api_create(PalmOilInvestII, filename = paste("Capstone", "Market Insider Invesment Palm Oil Platform"), fileopt = "overwrite")
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+options(browser = 'false')
+api_create(CPO_PalmOilPalement, filename = paste("Capstone", "Council of Palm oil Producer Price Data (barrel)"), fileopt = "overwrite")
+```
+
